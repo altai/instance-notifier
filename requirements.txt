@@ -1,0 +1,4 @@
+Jinja2
+python-keystoneclient
+python-novaclient
+python-openstackclient-base
