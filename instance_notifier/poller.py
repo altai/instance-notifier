@@ -104,11 +104,11 @@ def notify_inactive_letters(srv_inactive):
 
 def send_mails(mail_list):
     host_args = (local_settings.MAIL_SERVER, local_settings.MAIL_PORT)
-    if local_settings.MAIL_USE_SSL:
+    if getattr(local_settings, "MAIL_USE_SSL", False):
         host = smtplib.SMTP_SSL(*host_args)
     else:
         host = smtplib.SMTP(*host_args)
-    if local_settings.MAIL_USE_TLS:
+    if getattr(local_settings, "MAIL_USE_TLS", False):
         host.starttls()
     host.login(local_settings.MAIL_USERNAME, local_settings.MAIL_PASSWORD)
 
@@ -145,9 +145,13 @@ def alarm_handler():
         if not isinstance(state_list, dict):
             state_list = {}
 
-    server_list = openstack_client.compute.servers.list(
-        detailed=True, search_opts={"all_tenants": True})
-    fping_list = openstack_client.compute.fping.list(all_tenants=True)
+    try:
+        server_list = openstack_client.compute.servers.list(
+            detailed=True, search_opts={"all_tenants": True})
+        fping_list = openstack_client.compute.fping.list(all_tenants=True)
+    except Exception as ex:
+        LOG.error("cannot get data from server: %s" % ex)
+        return
     server_by_id = dict(((i.id, i) for i in server_list))
     srv_active = {}
     srv_inactive = []
