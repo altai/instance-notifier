@@ -39,6 +39,7 @@ SRV_STATE_FILENAME = "/var/lib/instance-notifier/srv_state.json"
 
 local_settings = object()
 SETTINGS_DIR = "/etc/instance-notifier"
+TEMPLATE_DIR = SETTINGS_DIR
 
 sys.path.append(SETTINGS_DIR)
 
@@ -52,7 +53,7 @@ openstack_client = client_set.ClientSet(**local_settings.KEYSTONE_CONF)
 
 
 def notify_active_letters(srv_active):
-    template_filename = "/etc/instance-notifier/notification_active.txt"
+    template_filename = "%s/notification_active.txt" % TEMPLATE_DIR
     template = jinja2.Template(open(template_filename, "r").read())
     tenant_list = openstack_client.identity_admin.tenants.list()
     tenant_by_id = dict(((i.id, i) for i in tenant_list))
@@ -89,7 +90,7 @@ def notify_active_letters(srv_active):
 
 def notify_inactive_letters(srv_inactive):
     if srv_inactive:
-        template_filename = "/etc/instance-notifier/notification_inactive.txt"
+        template_filename = "%s/notification_inactive.txt" % TEMPLATE_DIR
         template = jinja2.Template(open(template_filename, "r").read())
         try:
             yield (
@@ -125,6 +126,35 @@ def send_mails(mail_list):
         except:
             LOG.exception("unable to send an email")
     host.quit()
+
+
+NOTIFY_NONE = 0
+NOTIFY_ACTIVE = 1
+NOTIFY_INACTIVE = 2
+
+
+def must_notify(curr_status, now, srv_state, hysteresis):
+    prev_status = srv_state.get("status", "BUILD")
+    prev_at = srv_state.get("at", now)
+    if curr_status != prev_status:
+        srv_state["at"] = now
+        srv_state["prev_status"] = prev_status
+        srv_state["status"] = curr_status
+        srv_state["sent"] = False
+        if hysteresis != 0.0:
+            return NOTIFY_NONE
+    if srv_state.get("sent", False):
+        return NOTIFY_NONE
+    if now - prev_at < hysteresis or hysteresis < 0:
+        return NOTIFY_NONE
+    srv_state["sent"] = True
+    if curr_status in ("ALIVE", "DEAD"):
+        if not (curr_status == "ALIVE" and
+                srv_state.get("prev_status", "BUILD") != "DEAD"):
+            return NOTIFY_ACTIVE
+    else:
+        return NOTIFY_INACTIVE
+    return NOTIFY_NONE
 
 
 # stored data:
@@ -165,24 +195,12 @@ def alarm_handler():
             curr_status = "ALIVE" if srv.alive else "DEAD"
         srv.status = curr_status
         srv_state = state_list.setdefault(srv.id, {})
-        prev_status = srv_state.get("status", "BUILD")
-        prev_at = srv_state.get("at", now)
-        if curr_status != prev_status:
-            srv_state["at"] = now
-            srv_state["prev_status"] = prev_status
-            srv_state["status"] = curr_status
-            srv_state["sent"] = False
-        if srv_state.get("sent", False):
-            continue
-        hysteresis = local_settings.HYSTERESES.get(curr_status, -1)
-        if now - prev_at < hysteresis or hysteresis < 0:
-            continue
-        srv_state["sent"] = True
-        if curr_status in ("ALIVE", "DEAD"):
-            if not (curr_status == "ALIVE" and
-                    srv_state.get("prev_status", "BUILD") != "DEAD"):
-                srv_active.setdefault(srv.project_id, []).append(srv)
-        else:
+        notify = must_notify(
+            curr_status, now, srv_state,
+            local_settings.HYSTERESES.get(curr_status, -1))
+        if notify == NOTIFY_ACTIVE:
+            srv_active.setdefault(srv.project_id, []).append(srv)
+        elif notify == NOTIFY_INACTIVE:
             srv_inactive.append(srv)
 
     try:
