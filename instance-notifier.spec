@@ -19,9 +19,9 @@ BuildRoot:        %{_tmppath}/%{name}-%{version}-build
 BuildRequires:    python-devel python-setuptools make
 BuildArch:        noarch
 Requires:         python-jinja2
-Requires:         python-openstackclient-base-essex
-Requires:         python-novaclient-essex
-Requires:         python-keystoneclient-essex
+Requires:         python-openstackclient-base
+Requires:         python-novaclient
+Requires:         python-keystoneclient
 
 Requires:         start-stop-daemon
 
